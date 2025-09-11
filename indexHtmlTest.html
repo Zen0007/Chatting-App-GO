@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gin middleware Jwt Client</title>
+</head>
+
+<body>
+    <h2>Signup</h2>
+    <input id="signup-username" placeholder="Username">
+    <input type="text" id="email_s" placeholder="email">
+    <input id="signup-password" type="password" placeholder="Password">
+    <button onclick="signup()">Signup</button>
+
+    <h2>Login</h2>
+    <input type="email" id="Email" placeholder="email">
+    <input type="password" id="password" placeholder="password">
+    <button onclick="login()">Login</button>
+
+    <h2>access Protected router</h2>
+    <button onclick="getProceted()">Get Proceted</button>
+
+    <h2>Logout</h2>
+    <button onclick="logout()">Logout</button>
+
+    <pre id="Login"></pre>
+    <pre id="Logout"></pre>
+    <pre id="Signup"></pre>
+
+
+    <script>
+        let token = null;
+        async function login() {
+            const username = document.getElementById('Email').value;
+            const password = document.getElementById('password').value;
+
+            const rest = await fetch("http://localhost:8080/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            })
+
+            const data = await rest.json()
+            if (data.token) {
+                token = data.token;
+                document.getElementById("Login").textContent = "✅ Login success\nToken: " + data.token;
+            } else {
+                document.getElementById("Login").textContent = "❌ " + JSON.stringify(data);
+            }
+        }
+
+        async function signup() {
+            // const username = document.getElementById("signup-username").value;
+            // const password = document.getElementById("signup-password").value;
+            // const email = document.getElementById("email_s").value
+
+            try {
+                await fetch("http://localhost:8080/register", {
+                    method: "POST",
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: "deon 1224",
+                        email: "deon@gmail.com",
+                        password: "12342211"
+                    })
+                }).then(res => console.log("eee", res.json()))
+                    .then(data => console.log("success", data))
+                    .catch(err => console.log("err", err));
+
+
+
+
+            } catch (error) {
+                console.log("fetch failed", error)
+            }
+        }
+
+        async function logout() {
+            const res = await fetch("http://localhost:8080/logout", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + token }
+            })
+
+            token = null
+            document.getElementById("Logout").textContent = await res.text();
+        }
+    </script>
+</body>
+
+</html>
