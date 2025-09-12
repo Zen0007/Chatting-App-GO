@@ -35,7 +35,7 @@ func Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"err": "password too short"})
 		return
 	}
-	count, err := db.CheckDoc("account", bson.M{"email": user.Email})
+	count, err := db.CheckDoc("user", bson.M{"email": user.Email})
 	if err != nil {
 		log.Fatal(err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"err": err.Error()})
@@ -53,9 +53,9 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	userID := utils.GenerateIDUser(10)
+	userID := fmt.Sprint("0007", utils.GenerateIDUser(5))
 	ms := bson.M{
-		"userID":   userID,
+		"userId":   userID,
 		"userName": user.Name,
 		"email":    user.Email,
 		"password": user.Password,
@@ -68,19 +68,19 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	keys := bson.M{
-		"userID":   userID,
-		"username": user.Name,
-		"email":    user.Email,
-		"password": user.Password,
-	}
+	// keys := bson.M{
+	// 	"userID":   userID,
+	// 	"username": user.Name,
+	// 	"email":    user.Email,
+	// 	"password": user.Password,
+	// }
 
-	_, errd := db.InsertOne("account", keys)
-	if errd != nil {
-		fmt.Println(errd.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"err": fmt.Sprintf("database crash: %s", errd.Error())})
-		return
-	}
+	// _, errd := db.InsertOne("account", keys)
+	// if errd != nil {
+	// 	fmt.Println(errd.Error())
+	// 	c.JSON(http.StatusInternalServerError, gin.H{"err": fmt.Sprintf("database crash: %s", errd.Error())})
+	// 	return
+	// }
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": gin.H{

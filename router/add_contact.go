@@ -2,10 +2,12 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"main/db"
 	"main/upgrader"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -25,7 +27,7 @@ type Ids struct {
 
 type Friends struct {
 	Name   string `bson:"username"`
-	UserID string `bson:"userID"`
+	UserID string `bson:"userId"`
 }
 
 func AddCountact(c *gin.Context) {
@@ -37,92 +39,137 @@ func AddCountact(c *gin.Context) {
 		fmt.Print(err.Error())
 		return
 	}
+	out := make(chan any)
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
 
-	go handlerAddContact(conn)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer conn.Close()
+		for msg := range out {
+			if err := conn.WriteJSON(msg); err != nil {
+				log.Println("error when write", err.Error())
+				cancel()
+				break
+			}
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		handlerAddContact(conn, ctx, out)
+	}()
+	// Wait until connection is closed
+	<-ctx.Done()
+	wg.Wait()
+	close(out)
 
 }
 
-func handlerAddContact(conn *websocket.Conn) {
-	defer conn.Close()
-
+func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any) {
 	for {
 		var cont Contacts
 		if errR := conn.ReadJSON(&cont); errR != nil {
-			conn.WriteJSON(gin.H{"error when reading": errR.Error()})
+			select {
+			case out <- gin.H{"error when reading": errR.Error()}:
+			case <-ctx.Done():
+			}
 			fmt.Println("error when reading :", errR.Error())
 			break
 		}
 
 		friend, err := db.CheckDoc("user", bson.M{
-			"userID":           cont.UserID,
+			"userId":           cont.UserID,
 			"contact.friendId": cont.ContactID,
 		})
 		if err != nil {
 			log.Println(err.Error())
-			conn.WriteJSON(gin.H{"error when chek contact": err.Error()})
+			select {
+			case out <- gin.H{"error when chek contact": err.Error()}:
+			case <-ctx.Done():
+			}
 			break
 		}
 		if friend > 0 {
-			conn.WriteJSON(bson.M{"err": "has exist contact"})
+			select {
+			case out <- bson.M{"err": "has exist contact"}:
+			case <-ctx.Done():
+			}
 			break
 		}
 		user := Friends{}
 		contact := Friends{}
 		err = db.FindONe("user", bson.M{
-			"userID": cont.ContactID,
+			"userId": cont.ContactID,
 		}, &contact)
 
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
-				conn.WriteJSON(gin.H{"err": "contact doesn't exists "})
+				select {
+				case out <- gin.H{"err": "contact doesn't exists "}:
+				case <-ctx.Done():
+				}
 				break
 			} else {
-				conn.WriteJSON(gin.H{"err": err.Error()})
+				select {
+				case out <- gin.H{"err": err.Error()}:
+				case <-ctx.Done():
+				}
 				break
 			}
 		}
 		err = db.FindONe("user", bson.M{
-			"userID": cont.UserID,
+			"userId": cont.UserID,
 		}, &user)
 		if err != nil {
-			conn.WriteJSON(gin.H{"err": err.Error()})
+			select {
+			case out <- gin.H{"err": err.Error()}:
+			case <-ctx.Done():
+			}
 			break
 		}
 
 		updateUser := bson.M{
 			"$push": bson.M{
 				"contact": bson.M{
-					"name":        contact.Name,
-					"participant": contact.UserID,
-					"friendId":    cont.ContactID,
-					"messages":    bson.A{},
+					"frienName": contact.Name,
+					"friendId":  cont.ContactID,
+					"messages":  bson.A{},
 				},
 			},
 		}
 		updateCont := bson.M{
 			"$push": bson.M{
 				"contact": bson.M{
-					"name":        contact.Name,
-					"participant": contact.UserID,
-					"friendId":    cont.ContactID,
-					"messages":    bson.A{},
+					"frienName": user.Name,
+					"friendId":  user.UserID,
+					"messages":  bson.A{},
 				},
 			},
 		}
 
-		_, errs := db.UpdateOne("user", bson.M{"userID": cont.UserID}, updateUser)
-		_, erru := db.UpdateOne("user", bson.M{"userID": cont.ContactID}, updateCont)
+		_, errs := db.UpdateOne("user", bson.M{"userId": cont.UserID}, updateUser)
+		_, erru := db.UpdateOne("user", bson.M{"userId": cont.ContactID}, updateCont)
 		if errs != nil {
-			conn.WriteJSON(gin.H{"err": errs.Error()})
+			select {
+			case out <- gin.H{"err": errs.Error()}:
+			case <-ctx.Done():
+			}
 			break
 		}
 		if erru != nil {
-			conn.WriteJSON(gin.H{"err": erru.Error()})
-			return
-		}
-		if err = conn.WriteJSON(bson.M{"success": cont.ContactID}); err != nil {
-			log.Println(err.Error())
+			select {
+			case out <- gin.H{"err": erru.Error()}:
+			case <-ctx.Done():
+			}
 			break
+		}
+
+		select {
+		case out <- gin.H{"success": cont.ContactID}:
+		case <-ctx.Done():
 		}
 	}
 }
