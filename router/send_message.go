@@ -1,7 +1,9 @@
 package router
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"main/db"
 
 	"main/upgrader"
@@ -9,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Message struct {
@@ -17,8 +20,6 @@ type Message struct {
 	Text     string `json:"text"`
 	Date     string `json:"date"`
 }
-
-var update = make(chan Message)
 
 func SendMessage(c *gin.Context) {
 	u := upgrader.Upgrader()
@@ -30,56 +31,95 @@ func SendMessage(c *gin.Context) {
 		return
 	}
 
-	go handlerSendMessage(conn, update)
-	go handlerIncomingMessage(conn)
+	go handlerSendMessage(conn)
+	go func() {
+		defer conn.Close()
+
+		pipeline := mongo.Pipeline{
+			{{Key: "$match", Value: bson.D{
+				{Key: "operationType", Value: "update"},
+			}}},
+			{{Key: "$project", Value: bson.D{
+				{Key: "contactMessage", Value: "$updateDescription.updatedFields"},
+			}}},
+		}
+
+		stream, err := db.Connect().Collection("user").Watch(context.Background(), pipeline)
+		if err != nil {
+			log.Println("error when stream", err.Error())
+			conn.WriteJSON(gin.H{"error stream": err.Error()})
+			return
+		}
+		defer stream.Close(context.Background())
+
+		for stream.Next(context.Background()) {
+			var event map[string]any
+
+			if err := stream.Decode(&event); err != nil {
+				log.Println("decode error", err.Error())
+				continue
+			}
+			if err := conn.WriteJSON(event); err != nil {
+				log.Println("error when write data to client", err.Error())
+			}
+
+		}
+
+		if err := stream.Err(); err != nil {
+			log.Fatal(err.Error())
+		}
+
+	}()
+	// select{}
 }
 
-func handlerSendMessage(conn *websocket.Conn, update chan Message) {
+func handlerSendMessage(conn *websocket.Conn) {
 	defer conn.Close()
+
 	for {
 		var messages Message
 		if err := conn.ReadJSON(&messages); err != nil {
 			conn.WriteJSON(gin.H{"err": err.Error()})
 			break
 		}
+
 		filterSend := bson.M{
-			"$and": bson.M{
-				"userID":           messages.Sender,
-				"contact.friendId": messages.Receiver,
-			},
+			"userID":           messages.Sender,
+			"contact.friendId": messages.Receiver,
 		}
 		updateSend := bson.M{
-			"contact.friendId": bson.M{
-				"sender":   messages.Sender,
-				"receiver": messages.Receiver,
-				"dateTime": messages.Date,
-				"text":     messages.Text,
+			"$push": bson.M{
+				"contact.$.messages": bson.M{
+					"sender":   messages.Sender,
+					"receiver": messages.Receiver,
+					"dateTime": messages.Date,
+					"text":     messages.Text,
+				},
 			},
 		}
-
 		_, err := db.UpdateOne("user", filterSend, updateSend)
 		if err != nil {
-			conn.WriteJSON(gin.H{"err": err.Error()})
+			conn.WriteJSON(gin.H{"err update sender": err.Error()})
 			break
 		}
 
 		filterRec := bson.M{
-			"$and": bson.M{
-				"userID":           messages.Receiver,
-				"contact.friendId": messages.Sender,
-			},
+			"userID":           messages.Receiver,
+			"contact.friendId": messages.Sender,
 		}
 		updateRec := bson.M{
-			"contact.friendId": bson.M{
-				"sender":   messages.Sender,
-				"receiver": messages.Receiver,
-				"dateTime": messages.Date,
-				"text":     messages.Text,
+			"$push": bson.M{
+				"contact.$.messages": bson.M{
+					"sender":   messages.Sender,
+					"receiver": messages.Receiver,
+					"dateTime": messages.Date,
+					"text":     messages.Text,
+				},
 			},
 		}
 		_, err = db.UpdateOne("user", filterRec, updateRec)
 		if err != nil {
-			conn.WriteJSON(gin.H{"err": err.Error()})
+			conn.WriteJSON(gin.H{"err receiver": err.Error()})
 			break
 		}
 
@@ -93,6 +133,6 @@ func handlerSendMessage(conn *websocket.Conn, update chan Message) {
 
 		}
 
-		update <- messages
 	}
+
 }

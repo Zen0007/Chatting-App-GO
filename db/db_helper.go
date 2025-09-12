@@ -36,14 +36,6 @@ func Connect() *mongo.Database {
 	return clientInstance.Database("chat")
 }
 
-func Collection(pipeline any) (*mongo.ChangeStream, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	db := Connect()
-
-	return db.Collection("user").Watch(ctx, pipeline)
-}
 
 func InsertOne(coll string, data any) (*mongo.InsertOneResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

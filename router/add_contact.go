@@ -89,7 +89,7 @@ func handlerAddContact(conn *websocket.Conn) {
 			break
 		}
 
-		update := bson.M{
+		updateUser := bson.M{
 			"$push": bson.M{
 				"contact": bson.M{
 					"name":        contact.Name,
@@ -110,7 +110,7 @@ func handlerAddContact(conn *websocket.Conn) {
 			},
 		}
 
-		_, errs := db.UpdateOne("user", bson.M{"userID": cont.UserID}, update)
+		_, errs := db.UpdateOne("user", bson.M{"userID": cont.UserID}, updateUser)
 		_, erru := db.UpdateOne("user", bson.M{"userID": cont.ContactID}, updateCont)
 		if errs != nil {
 			conn.WriteJSON(gin.H{"err": errs.Error()})
@@ -120,7 +120,7 @@ func handlerAddContact(conn *websocket.Conn) {
 			conn.WriteJSON(gin.H{"err": erru.Error()})
 			return
 		}
-		if err = conn.WriteJSON(bson.M{"success": ""}); err != nil {
+		if err = conn.WriteJSON(bson.M{"success": cont.ContactID}); err != nil {
 			log.Println(err.Error())
 			break
 		}

@@ -24,7 +24,7 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 	var user Login
-	err := db.FindONe("account", bson.M{"email": login.Email}, &user)
+	err := db.FindONe("user", bson.M{"email": login.Email}, &user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(400, gin.H{"err": "user not exist"})
