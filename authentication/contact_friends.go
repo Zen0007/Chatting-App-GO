@@ -2,6 +2,7 @@ package authentication
 
 import (
 	"main/db"
+	"main/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -22,9 +23,9 @@ func ContactFriends(c *gin.Context) {
 		},
 	}
 	if err := db.FindONe("contact_friends", filter, &contact); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": contact})
+	c.JSON(http.StatusOK, gin.H{utils.Success: contact})
 }

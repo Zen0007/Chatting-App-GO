@@ -2,7 +2,7 @@ package utils
 
 import "math/rand"
 
-func GenerateIdText(n int) string {
+func GenerateIDText(n int) string {
 	char := []byte("abcdefghijklmnopqrstuxyz")
 	result := make([]byte, n)
 

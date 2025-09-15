@@ -7,6 +7,7 @@ import (
 	"log"
 	"main/db"
 	"main/upgrader"
+	"main/utils"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +36,7 @@ func AddCountact(c *gin.Context) {
 	conn, err := u.Upgrader.Upgrade(c.Writer, c.Request, nil)
 
 	if err != nil {
-		conn.WriteJSON(gin.H{"err": err.Error()})
+		conn.WriteJSON(gin.H{utils.Err: err.Error()})
 		fmt.Print(err.Error())
 		return
 	}
@@ -73,7 +74,7 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 		var cont Contacts
 		if errR := conn.ReadJSON(&cont); errR != nil {
 			select {
-			case out <- gin.H{"error when reading": errR.Error()}:
+			case out <- gin.H{utils.Err: errR.Error()}:
 			case <-ctx.Done():
 			}
 			fmt.Println("error when reading :", errR.Error())
@@ -87,14 +88,14 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 		if err != nil {
 			log.Println(err.Error())
 			select {
-			case out <- gin.H{"error when chek contact": err.Error()}:
+			case out <- gin.H{utils.Err: err.Error()}:
 			case <-ctx.Done():
 			}
 			break
 		}
 		if friend > 0 {
 			select {
-			case out <- bson.M{"err": "has exist contact"}:
+			case out <- gin.H{utils.Err: "has exist contact"}:
 			case <-ctx.Done():
 			}
 			break
@@ -108,13 +109,13 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
 				select {
-				case out <- gin.H{"err": "contact doesn't exists "}:
+				case out <- gin.H{utils.Err: "contact doesn't exists "}:
 				case <-ctx.Done():
 				}
 				break
 			} else {
 				select {
-				case out <- gin.H{"err": err.Error()}:
+				case out <- gin.H{utils.Err: err.Error()}:
 				case <-ctx.Done():
 				}
 				break
@@ -125,7 +126,7 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 		}, &user)
 		if err != nil {
 			select {
-			case out <- gin.H{"err": err.Error()}:
+			case out <- gin.H{utils.Err: err.Error()}:
 			case <-ctx.Done():
 			}
 			break
@@ -154,21 +155,21 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 		_, erru := db.UpdateOne("user", bson.M{"userId": cont.ContactID}, updateCont)
 		if errs != nil {
 			select {
-			case out <- gin.H{"err": errs.Error()}:
+			case out <- gin.H{utils.Err: errs.Error()}:
 			case <-ctx.Done():
 			}
 			break
 		}
 		if erru != nil {
 			select {
-			case out <- gin.H{"err": erru.Error()}:
+			case out <- gin.H{utils.Err: erru.Error()}:
 			case <-ctx.Done():
 			}
 			break
 		}
 
 		select {
-		case out <- gin.H{"success": cont.ContactID}:
+		case out <- gin.H{utils.Success: cont.ContactID}:
 		case <-ctx.Done():
 		}
 	}

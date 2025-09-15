@@ -2,6 +2,7 @@ package authentication
 
 import (
 	"main/db"
+	"main/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +12,7 @@ import (
 func GetProfile(c *gin.Context) {
 	var req Req
 	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{utils.Err: err.Error()})
 		return
 	}
 	filter := bson.M{
@@ -21,9 +22,9 @@ func GetProfile(c *gin.Context) {
 	var userDoc map[string]any
 
 	if err := db.FindONe("account", filter, &userDoc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": userDoc})
+	c.JSON(http.StatusOK, gin.H{utils.Success: userDoc})
 }

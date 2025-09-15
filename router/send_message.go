@@ -40,7 +40,7 @@ func SendMessage(c *gin.Context) {
 	conn, err := u.Upgrader.Upgrade(c.Writer, c.Request, nil)
 
 	if err != nil {
-		conn.WriteJSON(gin.H{"err": err.Error()})
+		conn.WriteJSON(gin.H{utils.Err: err.Error()})
 		fmt.Print(err.Error())
 		return
 	}
@@ -94,7 +94,7 @@ func watchMessage(ctx context.Context, out chan<- any) {
 	if err != nil {
 		log.Println("error when stream", err.Error())
 		select {
-		case out <- gin.H{"error stream": err.Error()}:
+		case out <- gin.H{utils.Err: err.Error()}:
 		case <-ctx.Done():
 		}
 		return
@@ -112,11 +112,13 @@ func watchMessage(ctx context.Context, out chan<- any) {
 		for _, v := range event.ContactMessage {
 			select {
 			case out <- gin.H{
-				"_id":      v.ID,
-				"dateTime": v.DateTime,
-				"receiver": v.Receiver,
-				"sender":   v.Sender,
-				"text":     v.Text,
+				utils.Success: gin.H{
+					"_id":      v.ID,
+					"dateTime": v.DateTime,
+					"receiver": v.Receiver,
+					"sender":   v.Sender,
+					"text":     v.Text,
+				},
 			}:
 			case <-ctx.Done():
 			}
@@ -134,13 +136,13 @@ func handlerSendMessage(conn *websocket.Conn, ctx context.Context, out chan<- an
 		var messages Message
 		if err := conn.ReadJSON(&messages); err != nil {
 			select {
-			case out <- gin.H{"err": err.Error()}:
+			case out <- gin.H{utils.Err: err.Error()}:
 			case <-ctx.Done():
 			}
 			break
 		}
 
-		id := utils.GenerateIdText(10)
+		id := utils.GenerateIDText(10)
 		filterSend := bson.M{
 			"userId":           messages.Sender,
 			"contact.friendId": messages.Receiver,
@@ -159,7 +161,7 @@ func handlerSendMessage(conn *websocket.Conn, ctx context.Context, out chan<- an
 		_, err := db.UpdateOne("user", filterSend, updateSend)
 		if err != nil {
 			select {
-			case out <- gin.H{"err update sender": err.Error()}:
+			case out <- gin.H{utils.Err: err.Error()}:
 			case <-ctx.Done():
 			}
 			break
@@ -183,17 +185,10 @@ func handlerSendMessage(conn *websocket.Conn, ctx context.Context, out chan<- an
 		_, err = db.UpdateOne("user", filterRec, updateRec)
 		if err != nil {
 			select {
-			case out <- gin.H{"err receiver": err.Error()}:
+			case out <- gin.H{utils.Err: err.Error()}:
 			case <-ctx.Done():
 			}
 			break
-		}
-
-		select {
-		case out <- gin.H{
-			"success": fmt.Sprintf("send text to: %s", messages.Receiver),
-		}:
-		case <-ctx.Done():
 		}
 
 	}

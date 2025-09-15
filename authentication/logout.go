@@ -1,8 +1,12 @@
 package authentication
 
-import "github.com/gin-gonic/gin"
+import (
+	"main/utils"
+
+	"github.com/gin-gonic/gin"
+)
 
 func Logout(c *gin.Context) {
 	c.SetCookie("token", "", -1, "/", "localhost", false, true)
-	c.JSON(200, gin.H{"success": "user logged out"})
+	c.JSON(200, gin.H{utils.Success: "user logged out"})
 }

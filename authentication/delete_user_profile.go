@@ -2,6 +2,7 @@ package authentication
 
 import (
 	"main/db"
+	"main/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +25,7 @@ type Profile struct {
 func DeleteUserProfile(c *gin.Context) {
 	var user Req
 	if err := c.BindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"err": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{utils.Err: err.Error()})
 		return
 	}
 
@@ -34,16 +35,16 @@ func DeleteUserProfile(c *gin.Context) {
 	}
 	_, err := db.Find("user_profile", filter, &data)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}
 	filter = bson.M{
 		"email": data.Email,
 	}
 	if _, err := db.DeleteOne("user_profile", filter); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": data.ID})
+	c.JSON(http.StatusOK, gin.H{utils.Success: data.ID})
 }
