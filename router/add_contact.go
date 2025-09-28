@@ -51,12 +51,11 @@ func AddContact(c *gin.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer conn.Close()
 		for msg := range out {
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Println("error when write", err.Error())
 				cancel()
-				break
+				return
 			}
 		}
 	}()
@@ -74,120 +73,99 @@ func AddContact(c *gin.Context) {
 }
 
 func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any, cancel context.CancelFunc) {
+	coll := db.Connect().Collection("user")
+
 	for {
+		var cont Contacts
+		if err := conn.ReadJSON(&cont); err != nil {
+			sendErr(ctx, out, "invalid request: "+err.Error())
+			cancel()
+			return
+		}
+
+		count, err := coll.CountDocuments(ctx, bson.M{
+			"userId":           cont.UserID,
+			"contact.friendId": cont.ContactID,
+		})
+		if err != nil {
+			sendErr(ctx, out, err.Error())
+			return
+		}
+		if count > 0 {
+			sendErr(ctx, out, "contact already exists")
+			continue
+		}
+
+		var user, contact Friends
+
+		err = coll.FindOne(ctx, bson.M{
+			"userId": cont.ContactID,
+		}).Decode(&contact)
+
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				sendErr(ctx, out, "contact does not exist")
+
+			} else {
+				sendErr(ctx, out, err.Error())
+			}
+			continue
+		}
+		err = coll.FindOne(ctx, bson.M{
+			"userId": cont.UserID,
+		}).Decode(&user)
+
+		if err != nil {
+			sendErr(ctx, out, err.Error())
+			continue
+		}
+
+		session, err := db.Connect().Client().StartSession()
+		if err != nil {
+			sendErr(ctx, out, err.Error())
+			return
+		}
+
+		_, err = session.WithTransaction(ctx, func(sc mongo.SessionContext) (interface{}, error) {
+			if _, er := coll.UpdateOne(sc, bson.M{"userId": cont.UserID}, bson.M{
+				"$push": bson.M{"contact": bson.M{"friendName": contact.Name, "friendId": cont.ContactID, "messages": bson.A{}}},
+			}); er != nil {
+				return nil, er
+			}
+			if _, er := coll.UpdateOne(sc, bson.M{"userId": cont.ContactID}, bson.M{
+				"$push": bson.M{"contact": bson.M{"friendName": user.Name, "friendId": user.UserID, "messages": bson.A{}}},
+			}); er != nil {
+				return nil, er
+			}
+
+			return nil, nil
+		})
+
+		session.EndSession(ctx)
+
+		if err != nil {
+			sendErr(ctx, out, err.Error())
+			continue
+		}
+
 		select {
+		case out <- gin.H{
+			"status": "success",
+			"contact": gin.H{
+				"id":   cont.ContactID,
+				"name": contact.Name,
+			},
+		}:
 		case <-ctx.Done():
 			return
-		default:
-			var cont Contacts
-			if errR := conn.ReadJSON(&cont); errR != nil {
-				select {
-				case out <- gin.H{utils.Err: errR.Error()}:
-				case <-ctx.Done():
-				}
-				fmt.Println("error when reading :", errR.Error())
-				cancel()
-				return
-			}
-			filter := bson.M{
-				"userId":           cont.UserID,
-				"contact.friendId": cont.ContactID,
-			}
-			friend, err := db.Connect().Collection("user").CountDocuments(ctx, filter)
-			if err != nil {
-				log.Println(err.Error())
-				select {
-				case out <- gin.H{utils.Err: err.Error()}:
-				case <-ctx.Done():
-				}
-				break
-			}
-			if friend > 0 {
-				select {
-				case out <- gin.H{utils.Err: "has exist contact"}:
-				case <-ctx.Done():
-				}
-				break
-			}
-
-			var user, contact Friends
-
-			err = db.Connect().Collection("user").FindOne(ctx, bson.M{
-				"userId": cont.ContactID,
-			}).Decode(&contact)
-
-			if err != nil {
-				if err == mongo.ErrNoDocuments {
-					select {
-					case out <- gin.H{utils.Err: "contact doesn't exists "}:
-					case <-ctx.Done():
-					}
-					break
-				} else {
-					select {
-					case out <- gin.H{utils.Err: err.Error()}:
-					case <-ctx.Done():
-					}
-					break
-				}
-			}
-			err = db.Connect().Collection("user").FindOne(ctx, bson.M{
-				"userId": cont.UserID,
-			}).Decode(&user)
-
-			if err != nil {
-				select {
-				case out <- gin.H{utils.Err: err.Error()}:
-				case <-ctx.Done():
-				}
-				break
-			}
-
-			updateUser := bson.M{
-				"$push": bson.M{
-					"contact": bson.M{
-						"friendName": contact.Name,
-						"friendId":   cont.ContactID,
-						"messages":   bson.A{},
-					},
-				},
-			}
-			updateCont := bson.M{
-				"$push": bson.M{
-					"contact": bson.M{
-						"friendName": user.Name,
-						"friendId":   user.UserID,
-						"messages":   bson.A{},
-					},
-				},
-			}
-
-			_, errs := db.Connect().Collection("user").UpdateOne(ctx, bson.M{
-				"userId": cont.UserID,
-			}, updateUser)
-			_, erru := db.Connect().Collection("user").UpdateOne(ctx, bson.M{
-				"userId": cont.ContactID,
-			}, updateCont)
-			if errs != nil {
-				select {
-				case out <- gin.H{utils.Err: errs.Error()}:
-				case <-ctx.Done():
-				}
-				break
-			}
-			if erru != nil {
-				select {
-				case out <- gin.H{utils.Err: erru.Error()}:
-				case <-ctx.Done():
-				}
-				break
-			}
-
-			select {
-			case out <- gin.H{utils.Success: cont.ContactID}:
-			case <-ctx.Done():
-			}
-
 		}
+
+	}
+}
+
+func sendErr(ctx context.Context, out chan<- any, msg string) {
+	select {
+	case out <- gin.H{utils.Err: msg}:
+	case <-ctx.Done():
 	}
 }

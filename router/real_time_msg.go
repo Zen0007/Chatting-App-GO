@@ -9,6 +9,7 @@ import (
 	"main/utils"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -38,6 +39,7 @@ func RealTimeChat(c *gin.Context) {
 	go func() {
 		defer wg.Done()
 		for msg := range out {
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Println("error when write data to client", err.Error())
 				cancel()
@@ -75,10 +77,8 @@ func RealTimeChat(c *gin.Context) {
 		stream, err := db.Connect().Collection("user").Watch(ctx, pipeline, opts)
 		if err != nil {
 			log.Println("error when stream", err.Error())
-			select {
-			case out <- gin.H{utils.Err: err.Error()}:
-			case <-ctx.Done():
-			}
+			out <- gin.H{utils.Err: err.Error()}
+			cancel()
 			return
 		}
 		defer stream.Close(ctx)
@@ -110,6 +110,7 @@ func RealTimeChat(c *gin.Context) {
 
 		if err := stream.Err(); err != nil {
 			log.Println(err.Error())
+			out <- gin.H{utils.Err: err.Error()}
 		}
 	}()
 

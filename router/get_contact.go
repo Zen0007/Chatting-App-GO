@@ -49,7 +49,7 @@ func GetContact(c *gin.Context) {
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Println("error when write data to client", err.Error())
 				cancel()
-				break
+				return
 			}
 		}
 	}()
@@ -58,45 +58,43 @@ func GetContact(c *gin.Context) {
 	go func() {
 		defer wg.Done()
 		for {
-			select {
-			case <-ctx.Done():
+			var userID User
+			if err := conn.ReadJSON(&userID); err != nil {
+				log.Println("read error GetContact:", err)
+				cancel()
 				return
-			default:
-				var userID User
-				if err := conn.ReadJSON(&userID); err != nil {
-					log.Println("read error GetContact:", err)
-					cancel()
-					break
-				}
+			}
 
-				filter := bson.M{
-					"userId": userID.ID,
-				}
-				csr, err := db.Connect().Collection("user").Find(ctx, filter)
-				if err != nil {
-					log.Println("db find error:", err)
-					cancel()
-					break
-				}
+			filter := bson.M{
+				"userId": userID.ID,
+			}
+			csr, err := db.Connect().Collection("user").Find(ctx, filter)
+			if err != nil {
+				log.Println("db find error:", err)
+				out <- gin.H{utils.Err: err.Error()}
+				cancel()
+				return
+			}
 
-				for csr.Next(ctx) {
-					var contact Friend
-					if err := csr.Decode(&contact); err != nil {
-						log.Println("decode error GetContact:", err)
-						continue
-					}
-					select {
-					case out <- contact.Contact:
-					case <-ctx.Done():
-						return
-					}
-				}
+			defer csr.Close(ctx)
 
-				if err := csr.Err(); err != nil {
-					log.Println("cursor error", err)
-					cancel()
+			for csr.Next(ctx) {
+				var contact Friend
+				if err := csr.Decode(&contact); err != nil {
+					log.Println("decode error GetContact:", err)
+					continue
+				}
+				select {
+				case out <- contact.Contact:
+				case <-ctx.Done():
 					return
 				}
+			}
+
+			if err := csr.Err(); err != nil {
+				log.Println("cursor error", err)
+				cancel()
+				return
 			}
 
 		}

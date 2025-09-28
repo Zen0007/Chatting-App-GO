@@ -9,6 +9,7 @@ import (
 	"main/utils"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -55,6 +56,7 @@ func SendMessage(c *gin.Context) {
 	go func() {
 		defer wg.Done()
 		for msg := range out {
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Println("error when write data to client", err.Error())
 				cancel()
@@ -112,7 +114,6 @@ func processMessage(ctx context.Context, msg Message) error {
 
 	// use transactions for atomitcity
 	session, err := db.Connect().Client().StartSession()
-
 	if err != nil {
 		return err
 	}
@@ -120,18 +121,23 @@ func processMessage(ctx context.Context, msg Message) error {
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(sessionCtx mongo.SessionContext) (interface{}, error) {
+
+		// update sender
 		if _, er := dbConn.UpdateOne(sessionCtx, bson.M{
 			"userId":           msg.Sender,
 			"contact.friendId": msg.Receiver,
 		}, update); er != nil {
 			return nil, er
 		}
+
+		// update receiver
 		if _, er := dbConn.UpdateOne(sessionCtx, bson.M{
 			"userId":           msg.Receiver,
 			"contact.friendId": msg.Sender,
 		}, update); er != nil {
 			return nil, er
 		}
+
 		return nil, nil
 	})
 	return err

@@ -8,6 +8,7 @@ import (
 	"main/utils"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -39,6 +40,7 @@ func SendContactRealTime(c *gin.Context) {
 	go func() {
 		defer wg.Done()
 		for msg := range out {
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Println("ws write error:", err)
 				cancel()
@@ -65,6 +67,7 @@ func SendContactRealTime(c *gin.Context) {
 		if err != nil {
 			log.Println("error when stream", err.Error())
 			out <- gin.H{utils.Err: err.Error()}
+			cancel()
 			return
 		}
 		defer stream.Close(ctx)
@@ -86,6 +89,7 @@ func SendContactRealTime(c *gin.Context) {
 		if err := stream.Err(); err != nil {
 			log.Println(err.Error())
 			out <- gin.H{utils.Err: err.Error()}
+			cancel()
 		}
 
 	}()
