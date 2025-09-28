@@ -7,10 +7,12 @@ import (
 	"main/db"
 	"main/upgrader"
 	"main/utils"
+	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Message struct {
@@ -38,10 +40,12 @@ func SendMessage(c *gin.Context) {
 	conn, err := u.Upgrader.Upgrade(c.Writer, c.Request, nil)
 
 	if err != nil {
-		conn.WriteJSON(gin.H{utils.Err: err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{utils.Err: err.Error()})
 		fmt.Print(err.Error())
 		return
 	}
+
+	defer conn.Close()
 
 	out := make(chan any)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -49,13 +53,12 @@ func SendMessage(c *gin.Context) {
 
 	wg.Add(1)
 	go func() {
-		defer conn.Close()
 		defer wg.Done()
 		for msg := range out {
 			if err := conn.WriteJSON(msg); err != nil {
 				log.Println("error when write data to client", err.Error())
 				cancel()
-				break
+				return
 			}
 		}
 	}()
@@ -64,77 +67,72 @@ func SendMessage(c *gin.Context) {
 	go func() {
 		defer wg.Done()
 		for {
-			var messages Message
-			if err := conn.ReadJSON(&messages); err != nil {
+			var msg Message
+			if err := conn.ReadJSON(&msg); err != nil {
+				log.Println("read error:", err)
 				select {
 				case out <- gin.H{utils.Err: err.Error()}:
 				case <-ctx.Done():
 				}
-				log.Println(err.Error())
 				cancel()
 				break
 			}
-			processMessage(messages, out, ctx)
+			if err := processMessage(ctx, msg); err != nil {
+				select {
+				case out <- gin.H{utils.Err: err.Error()}:
+				case <-ctx.Done():
+				}
+			}
 		}
 	}()
 
 	//Channel for all outgoing messages
 	<-ctx.Done()
-	wg.Wait()
 	close(out)
+	wg.Wait()
 
 }
 
-func processMessage(messages Message, out chan<- any, ctx context.Context) {
+func processMessage(ctx context.Context, msg Message) error {
 	id := utils.GenerateIDText(10)
-	filterSend := bson.M{
-		"userId":           messages.Sender,
-		"contact.friendId": messages.Receiver,
-	}
-	updateSend := bson.M{
+
+	dbConn := db.Connect().Collection("user")
+
+	update := bson.M{
 		"$push": bson.M{
 			"contact.$.messages": bson.M{
 				"id":       id,
-				"sender":   messages.Sender,
-				"receiver": messages.Receiver,
-				"dateTime": messages.Date,
-				"text":     messages.Text,
+				"sender":   msg.Sender,
+				"receiver": msg.Receiver,
+				"dateTime": msg.Date,
+				"text":     msg.Text,
 			},
 		},
 	}
-	_, err := db.Connect().Collection("user").UpdateOne(ctx, filterSend, updateSend)
+
+	// use transactions for atomitcity
+	session, err := db.Connect().Client().StartSession()
+
 	if err != nil {
-		select {
-		case out <- gin.H{utils.Err: err.Error()}:
-		case <-ctx.Done():
-		}
-		log.Println(err.Error())
-		return
+		return err
 	}
 
-	filterRec := bson.M{
-		"userId":           messages.Receiver,
-		"contact.friendId": messages.Sender,
-	}
-	updateRec := bson.M{
-		"$push": bson.M{
-			"contact.$.messages": bson.M{
-				"id":       id,
-				"sender":   messages.Sender,
-				"receiver": messages.Receiver,
-				"dateTime": messages.Date,
-				"text":     messages.Text,
-			},
-		},
-	}
-	_, err = db.Connect().Collection("user").UpdateOne(ctx, filterRec, updateRec)
-	if err != nil {
-		select {
-		case out <- gin.H{utils.Err: err.Error()}:
-		case <-ctx.Done():
-		}
-		log.Println(err.Error())
-		return
-	}
+	defer session.EndSession(ctx)
 
+	_, err = session.WithTransaction(ctx, func(sessionCtx mongo.SessionContext) (interface{}, error) {
+		if _, er := dbConn.UpdateOne(sessionCtx, bson.M{
+			"userId":           msg.Sender,
+			"contact.friendId": msg.Receiver,
+		}, update); er != nil {
+			return nil, er
+		}
+		if _, er := dbConn.UpdateOne(sessionCtx, bson.M{
+			"userId":           msg.Receiver,
+			"contact.friendId": msg.Sender,
+		}, update); er != nil {
+			return nil, er
+		}
+		return nil, nil
+	})
+	return err
 }

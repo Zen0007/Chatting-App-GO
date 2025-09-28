@@ -2,11 +2,11 @@ package router
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"main/db"
 	"main/upgrader"
 	"main/utils"
+	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -31,17 +31,19 @@ func GetContact(c *gin.Context) {
 	conn, err := u.Upgrader.Upgrade(c.Writer, c.Request, nil)
 
 	if err != nil {
-		conn.WriteJSON(gin.H{utils.Err: err.Error()})
-		fmt.Print(err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{utils.Err: err.Error()})
+		log.Println("websocket upgrade failed:", err)
 		return
 	}
+
+	defer conn.Close()
+
 	out := make(chan any)
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
-		defer conn.Close()
 		defer wg.Done()
 		for msg := range out {
 			if err := conn.WriteJSON(msg); err != nil {
@@ -56,32 +58,43 @@ func GetContact(c *gin.Context) {
 	go func() {
 		defer wg.Done()
 		for {
-			var userID User
-			if err := conn.ReadJSON(&userID); err != nil {
-				log.Println("when readJson Get Contact", err.Error())
-				cancel()
-				break
-			}
-
-			filter := bson.M{
-				"userId": userID.ID,
-			}
-			csr, err := db.Connect().Collection("user").Find(ctx, filter)
-			if err != nil {
-				log.Println(err.Error())
-				cancel()
-				break
-			}
-
-			for csr.Next(ctx) {
-				var contact Friend
-				if err := csr.Decode(&contact); err != nil {
-					log.Println("Get contact", err.Error())
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				var userID User
+				if err := conn.ReadJSON(&userID); err != nil {
+					log.Println("read error GetContact:", err)
+					cancel()
 					break
 				}
-				select {
-				case out <- contact.Contact:
-				case <-ctx.Done():
+
+				filter := bson.M{
+					"userId": userID.ID,
+				}
+				csr, err := db.Connect().Collection("user").Find(ctx, filter)
+				if err != nil {
+					log.Println("db find error:", err)
+					cancel()
+					break
+				}
+
+				for csr.Next(ctx) {
+					var contact Friend
+					if err := csr.Decode(&contact); err != nil {
+						log.Println("decode error GetContact:", err)
+						continue
+					}
+					select {
+					case out <- contact.Contact:
+					case <-ctx.Done():
+						return
+					}
+				}
+
+				if err := csr.Err(); err != nil {
+					log.Println("cursor error", err)
+					cancel()
 					return
 				}
 			}

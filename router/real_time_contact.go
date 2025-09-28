@@ -2,11 +2,11 @@ package router
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"main/db"
 	"main/upgrader"
 	"main/utils"
+	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -18,10 +18,16 @@ import (
 func SendContactRealTime(c *gin.Context) {
 	u := upgrader.Upgrader()
 	conn, err := u.Upgrader.Upgrade(c.Writer, c.Request, nil)
-
 	if err != nil {
-		conn.WriteJSON(gin.H{utils.Err: err.Error()})
-		fmt.Print(err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{utils.Err: err.Error()})
+		return
+	}
+
+	defer conn.Close()
+
+	var id User
+	if err := conn.ReadJSON(&id); err != nil {
+		log.Println(err.Error())
 		return
 	}
 
@@ -31,24 +37,15 @@ func SendContactRealTime(c *gin.Context) {
 
 	wg.Add(1)
 	go func() {
-		defer conn.Close()
 		defer wg.Done()
 		for msg := range out {
 			if err := conn.WriteJSON(msg); err != nil {
-				log.Println("err when writing ws", err.Error())
+				log.Println("ws write error:", err)
 				cancel()
-				break
+				return
 			}
 		}
 	}()
-	var id User
-	if err := conn.ReadJSON(&id); err != nil {
-		log.Println(err.Error())
-		cancel()
-		wg.Wait()
-		close(out)
-		return
-	}
 
 	wg.Add(1)
 	go func() {
@@ -67,10 +64,7 @@ func SendContactRealTime(c *gin.Context) {
 		stream, err := db.Connect().Collection("user").Watch(ctx, pipeline, opts)
 		if err != nil {
 			log.Println("error when stream", err.Error())
-			select {
-			case out <- gin.H{utils.Err: err.Error()}:
-			case <-ctx.Done():
-			}
+			out <- gin.H{utils.Err: err.Error()}
 			return
 		}
 		defer stream.Close(ctx)
@@ -91,6 +85,7 @@ func SendContactRealTime(c *gin.Context) {
 
 		if err := stream.Err(); err != nil {
 			log.Println(err.Error())
+			out <- gin.H{utils.Err: err.Error()}
 		}
 
 	}()
