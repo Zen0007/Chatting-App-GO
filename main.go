@@ -15,7 +15,7 @@ import (
 func main() {
 	envErr := godotenv.Load(".env")
 	if envErr != nil {
-		log.Fatal("Error loading .env file")
+		log.Println("Error loading .env file")
 	}
 	dbLink := os.Getenv("DATABASE_LINK")
 	fmt.Println("db Link", dbLink)

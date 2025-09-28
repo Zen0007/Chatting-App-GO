@@ -21,7 +21,7 @@ func GetProfile(c *gin.Context) {
 	}
 	var userDoc map[string]any
 
-	if err := db.FindONe("account", filter, &userDoc); err != nil {
+	if err := db.FindOne("account", filter, &userDoc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}

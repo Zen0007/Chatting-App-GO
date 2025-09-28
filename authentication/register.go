@@ -22,7 +22,7 @@ func Register(c *gin.Context) {
 	var user Auth
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{utils.Err: err.Error()})
-		log.Fatal(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
@@ -37,7 +37,7 @@ func Register(c *gin.Context) {
 	}
 	count, err := db.CheckDoc("user", bson.M{"email": user.Email})
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Println(err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}
@@ -49,7 +49,7 @@ func Register(c *gin.Context) {
 
 	user.Password, err = utils.GenerateHashPassword(user.Password)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: "could not generate password has"})
+		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: "could not generate password hash"})
 		return
 	}
 

@@ -10,9 +10,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Message struct {
@@ -65,132 +63,78 @@ func SendMessage(c *gin.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handlerSendMessage(conn, ctx, out)
+		for {
+			var messages Message
+			if err := conn.ReadJSON(&messages); err != nil {
+				select {
+				case out <- gin.H{utils.Err: err.Error()}:
+				case <-ctx.Done():
+				}
+				log.Println(err.Error())
+				cancel()
+				break
+			}
+			processMessage(messages, out, ctx)
+		}
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		watchMessage(ctx, out)
-
-	}()
 	//Channel for all outgoing messages
 	<-ctx.Done()
 	wg.Wait()
 	close(out)
+
 }
 
-func watchMessage(ctx context.Context, out chan<- any) {
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.D{
-			{Key: "operationType", Value: "update"},
-		}}},
-		{{Key: "$project", Value: bson.D{
-			{Key: "contactMessage", Value: "$updateDescription.updatedFields"},
-		}}},
+func processMessage(messages Message, out chan<- any, ctx context.Context) {
+	id := utils.GenerateIDText(10)
+	filterSend := bson.M{
+		"userId":           messages.Sender,
+		"contact.friendId": messages.Receiver,
 	}
-
-	stream, err := db.Connect().Collection("user").Watch(context.Background(), pipeline)
+	updateSend := bson.M{
+		"$push": bson.M{
+			"contact.$.messages": bson.M{
+				"id":       id,
+				"sender":   messages.Sender,
+				"receiver": messages.Receiver,
+				"dateTime": messages.Date,
+				"text":     messages.Text,
+			},
+		},
+	}
+	_, err := db.Connect().Collection("user").UpdateOne(ctx, filterSend, updateSend)
 	if err != nil {
-		log.Println("error when stream", err.Error())
 		select {
 		case out <- gin.H{utils.Err: err.Error()}:
 		case <-ctx.Done():
 		}
+		log.Println(err.Error())
 		return
 	}
-	defer stream.Close(context.Background())
 
-	for stream.Next(context.Background()) {
-		var event messages
-
-		if err := stream.Decode(&event); err != nil {
-			log.Println("decode error", err.Error())
-			continue
-		}
-
-		for _, v := range event.ContactMessage {
-			select {
-			case out <- gin.H{
-				utils.Success: gin.H{
-					"_id":      v.ID,
-					"dateTime": v.DateTime,
-					"receiver": v.Receiver,
-					"sender":   v.Sender,
-					"text":     v.Text,
-				},
-			}:
-			case <-ctx.Done():
-			}
-		}
+	filterRec := bson.M{
+		"userId":           messages.Receiver,
+		"contact.friendId": messages.Sender,
 	}
-
-	if err := stream.Err(); err != nil {
-		log.Fatal(err.Error())
+	updateRec := bson.M{
+		"$push": bson.M{
+			"contact.$.messages": bson.M{
+				"id":       id,
+				"sender":   messages.Sender,
+				"receiver": messages.Receiver,
+				"dateTime": messages.Date,
+				"text":     messages.Text,
+			},
+		},
 	}
-
-}
-
-func handlerSendMessage(conn *websocket.Conn, ctx context.Context, out chan<- any) {
-	for {
-		var messages Message
-		if err := conn.ReadJSON(&messages); err != nil {
-			select {
-			case out <- gin.H{utils.Err: err.Error()}:
-			case <-ctx.Done():
-			}
-			break
+	_, err = db.Connect().Collection("user").UpdateOne(ctx, filterRec, updateRec)
+	if err != nil {
+		select {
+		case out <- gin.H{utils.Err: err.Error()}:
+		case <-ctx.Done():
 		}
-
-		id := utils.GenerateIDText(10)
-		filterSend := bson.M{
-			"userId":           messages.Sender,
-			"contact.friendId": messages.Receiver,
-		}
-		updateSend := bson.M{
-			"$push": bson.M{
-				"contact.$.messages": bson.M{
-					"id":       id,
-					"sender":   messages.Sender,
-					"receiver": messages.Receiver,
-					"dateTime": messages.Date,
-					"text":     messages.Text,
-				},
-			},
-		}
-		_, err := db.UpdateOne("user", filterSend, updateSend)
-		if err != nil {
-			select {
-			case out <- gin.H{utils.Err: err.Error()}:
-			case <-ctx.Done():
-			}
-			break
-		}
-
-		filterRec := bson.M{
-			"userId":           messages.Receiver,
-			"contact.friendId": messages.Sender,
-		}
-		updateRec := bson.M{
-			"$push": bson.M{
-				"contact.$.messages": bson.M{
-					"id":       id,
-					"sender":   messages.Sender,
-					"receiver": messages.Receiver,
-					"dateTime": messages.Date,
-					"text":     messages.Text,
-				},
-			},
-		}
-		_, err = db.UpdateOne("user", filterRec, updateRec)
-		if err != nil {
-			select {
-			case out <- gin.H{utils.Err: err.Error()}:
-			case <-ctx.Done():
-			}
-			break
-		}
-
+		log.Println(err.Error())
+		return
 	}
 
 }

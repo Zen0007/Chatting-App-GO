@@ -22,7 +22,7 @@ func ContactFriends(c *gin.Context) {
 			"$exists": true,
 		},
 	}
-	if err := db.FindONe("contact_friends", filter, &contact); err != nil {
+	if err := db.FindOne("contact_friends", filter, &contact); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{utils.Err: err.Error()})
 		return
 	}

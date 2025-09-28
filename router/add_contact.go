@@ -31,7 +31,7 @@ type Friends struct {
 	UserID string `bson:"userId"`
 }
 
-func AddCountact(c *gin.Context) {
+func AddContact(c *gin.Context) {
 	u := upgrader.Upgrader()
 	conn, err := u.Upgrader.Upgrade(c.Writer, c.Request, nil)
 
@@ -59,8 +59,8 @@ func AddCountact(c *gin.Context) {
 
 	wg.Add(1)
 	go func() {
-		wg.Done()
-		handlerAddContact(conn, ctx, out)
+		defer wg.Done()
+		handlerAddContact(conn, ctx, out, cancel)
 	}()
 	// Wait until connection is closed
 	<-ctx.Done()
@@ -69,7 +69,7 @@ func AddCountact(c *gin.Context) {
 
 }
 
-func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any) {
+func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any, cancel context.CancelFunc) {
 	for {
 		var cont Contacts
 		if errR := conn.ReadJSON(&cont); errR != nil {
@@ -78,13 +78,14 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 			case <-ctx.Done():
 			}
 			fmt.Println("error when reading :", errR.Error())
+			cancel()
 			break
 		}
-
-		friend, err := db.CheckDoc("user", bson.M{
+		filter := bson.M{
 			"userId":           cont.UserID,
 			"contact.friendId": cont.ContactID,
-		})
+		}
+		friend, err := db.Connect().Collection("user").CountDocuments(ctx, filter)
 		if err != nil {
 			log.Println(err.Error())
 			select {
@@ -100,11 +101,14 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 			}
 			break
 		}
+		// FindOne("user", bson.M{
+		// 	"userId": cont.ContactID,
+		// }, &contact)
 		user := Friends{}
 		contact := Friends{}
-		err = db.FindONe("user", bson.M{
+		err = db.Connect().Collection("user").FindOne(ctx, bson.M{
 			"userId": cont.ContactID,
-		}, &contact)
+		}).Decode(&contact)
 
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
@@ -121,9 +125,10 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 				break
 			}
 		}
-		err = db.FindONe("user", bson.M{
+		err = db.Connect().Collection("user").FindOne(ctx, bson.M{
 			"userId": cont.UserID,
-		}, &user)
+		}).Decode(&user)
+
 		if err != nil {
 			select {
 			case out <- gin.H{utils.Err: err.Error()}:
@@ -135,24 +140,28 @@ func handlerAddContact(conn *websocket.Conn, ctx context.Context, out chan<- any
 		updateUser := bson.M{
 			"$push": bson.M{
 				"contact": bson.M{
-					"frienName": contact.Name,
-					"friendId":  cont.ContactID,
-					"messages":  bson.A{},
+					"friendName": contact.Name,
+					"friendId":   cont.ContactID,
+					"messages":   bson.A{},
 				},
 			},
 		}
 		updateCont := bson.M{
 			"$push": bson.M{
 				"contact": bson.M{
-					"frienName": user.Name,
-					"friendId":  user.UserID,
-					"messages":  bson.A{},
+					"friendName": user.Name,
+					"friendId":   user.UserID,
+					"messages":   bson.A{},
 				},
 			},
 		}
 
-		_, errs := db.UpdateOne("user", bson.M{"userId": cont.UserID}, updateUser)
-		_, erru := db.UpdateOne("user", bson.M{"userId": cont.ContactID}, updateCont)
+		_, errs := db.Connect().Collection("user").UpdateOne(ctx, bson.M{
+			"userId": cont.UserID,
+		}, updateUser)
+		_, erru := db.Connect().Collection("user").UpdateOne(ctx, bson.M{
+			"userId": cont.ContactID,
+		}, updateCont)
 		if errs != nil {
 			select {
 			case out <- gin.H{utils.Err: errs.Error()}:

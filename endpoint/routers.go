@@ -25,9 +25,10 @@ func AuthRouters(r *gin.Engine) {
 func HandlerRouter(r *gin.Engine) {
 	routers := r.Group("/ws")
 	{
-		routers.GET("/addCountact", router.AddCountact)
+		routers.GET("/realTimeMessage", router.RealTimeChat)
+		routers.GET("/addCountact", router.AddContact)
 		routers.GET("/sendMessage", router.SendMessage)
-		routers.GET("/getMessage", router.GetMessage)
+		routers.GET("/getContact", router.GetContact)
 	}
 
 }

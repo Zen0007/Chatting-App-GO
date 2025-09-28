@@ -28,14 +28,13 @@ func Connect() *mongo.Database {
 		client, err := mongo.Connect(ctx, options.Client().ApplyURI(dbLink))
 
 		if err != nil {
-			log.Fatal("Mongo connect error", err)
+			log.Println("Mongo connect error", err)
 		}
 		clientInstance = client
 	})
 
 	return clientInstance.Database("chat")
 }
-
 
 func InsertOne(coll string, data any) (*mongo.InsertOneResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -62,7 +61,7 @@ func Find(coll string, key any, result any) (string, error) {
 	csr, err := db.Collection(coll).Find(ctx, key)
 
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Println(err.Error())
 		return "", err
 	}
 	defer csr.Close(ctx)
@@ -77,7 +76,7 @@ func Find(coll string, key any, result any) (string, error) {
 	return "find success", nil
 }
 
-func FindONe(coll string, key any, result any) error {
+func FindOne(coll string, key any, result any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

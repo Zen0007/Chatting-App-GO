@@ -1,7 +1,6 @@
 package authentication
 
 import (
-	"fmt"
 	"main/db"
 	"main/utils"
 	"time"
@@ -24,13 +23,13 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 	var user Login
-	err := db.FindONe("user", bson.M{"email": login.Email}, &user)
+	err := db.FindOne("user", bson.M{"email": login.Email}, &user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(400, gin.H{utils.Err: "user not exist"})
 			return
 		} else {
-			c.JSON(500, gin.H{utils.Err: fmt.Sprintf("db error %s", err.Error())})
+			c.JSON(500, gin.H{utils.Err: "internal server error"})
 			return
 		}
 
